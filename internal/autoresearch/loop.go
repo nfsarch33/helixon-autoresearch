@@ -31,12 +31,16 @@ func DefaultLoopConfig() LoopConfig {
 // ErrDuplicateExperiment is returned when deduplication detects an identical hypothesis.
 var ErrDuplicateExperiment = fmt.Errorf("duplicate experiment")
 
+// ErrGuardrailTerminated is returned when a guardrail prevents further execution.
+var ErrGuardrailTerminated = fmt.Errorf("guardrail terminated loop")
+
 // ExperimentLoop orchestrates the experiment lifecycle through all phases.
 type ExperimentLoop struct {
-	engram  EngramClient
-	logger  *slog.Logger
-	metrics *ExperimentMetrics
-	cfg     LoopConfig
+	engram     EngramClient
+	logger     *slog.Logger
+	metrics    *ExperimentMetrics
+	cfg        LoopConfig
+	guardrails *LoopController
 }
 
 // NewExperimentLoop creates a loop that persists results to Engram.
@@ -63,6 +67,16 @@ func NewExperimentLoopWithConfig(engram EngramClient, logger *slog.Logger, metri
 	}
 }
 
+// SetGuardrails configures loop termination guardrails.
+func (l *ExperimentLoop) SetGuardrails(guardrails *LoopController) {
+	l.guardrails = guardrails
+}
+
+// Guardrails returns the configured guardrails, or nil if not set.
+func (l *ExperimentLoop) Guardrails() *LoopController {
+	return l.guardrails
+}
+
 // Metrics returns the metrics collector for external inspection.
 func (l *ExperimentLoop) Metrics() *ExperimentMetrics {
 	return l.metrics
@@ -73,6 +87,22 @@ func (l *ExperimentLoop) Metrics() *ExperimentMetrics {
 // runs through each phase with timeout enforcement,
 // and persists the final result to Engram.
 func (l *ExperimentLoop) RunExperiment(ctx context.Context, config ExperimentConfig) (ExperimentResult, error) {
+	if l.guardrails != nil {
+		status := l.guardrails.ShouldContinue()
+		if !status.ShouldContinue {
+			l.logger.Warn("guardrails prevented experiment execution",
+				"reasons", status.ActiveReasons,
+				"actions", status.Actions,
+			)
+			return ExperimentResult{}, fmt.Errorf("%w: %v", ErrGuardrailTerminated, status.ActiveReasons)
+		}
+		l.logger.Info("guardrails check passed",
+			"stagnation_window", status.Stagnation.WindowSize,
+			"circuit_state", status.CircuitState,
+			"budget_remaining_credits", status.Budget.CreditsRemaining,
+		)
+	}
+
 	if err := config.Validate(); err != nil {
 		return ExperimentResult{}, fmt.Errorf("invalid config: %w", err)
 	}
@@ -139,6 +169,9 @@ func (l *ExperimentLoop) RunExperiment(ctx context.Context, config ExperimentCon
 			result.Duration = time.Since(expStart)
 			l.metrics.RecordRun(StatusFailed, result.Duration)
 			l.persistResult(ctx, result)
+			if l.guardrails != nil {
+				l.guardrails.RecordExperiment(0, 0, false)
+			}
 			return result, ctx.Err()
 		}
 
@@ -162,6 +195,9 @@ func (l *ExperimentLoop) RunExperiment(ctx context.Context, config ExperimentCon
 			result.Duration = time.Since(expStart)
 			l.metrics.RecordRun(StatusFailed, result.Duration)
 			l.persistResult(ctx, result)
+			if l.guardrails != nil {
+				l.guardrails.RecordExperiment(0, 0, false)
+			}
 			return result, fmt.Errorf("phase %s failed: %w", phase.String(), err)
 		}
 
@@ -177,6 +213,11 @@ func (l *ExperimentLoop) RunExperiment(ctx context.Context, config ExperimentCon
 	result.Duration = time.Since(expStart)
 	l.metrics.RecordRun(StatusCompleted, result.Duration)
 	l.persistResult(ctx, result)
+
+	if l.guardrails != nil {
+		score := computeScore(result)
+		l.guardrails.RecordExperiment(score, 0, true)
+	}
 
 	expLogger.Info("experiment completed",
 		"duration", result.Duration.String(),
