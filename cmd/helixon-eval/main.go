@@ -29,11 +29,17 @@ func main() {
 	flag.Parse()
 
 	// Resolve API keys from 1Password. These MUST never be hardcoded.
-	keys, err := resolveKeys(logger)
+	keys, err := resolveKeys(liveOpRead{})
 	if err != nil {
 		logger.Error("failed to resolve API keys from 1Password", "err", err)
 		os.Exit(1)
 	}
+	picked, label := pickMinimaxKey(keys, nil)
+	logger.Info("resolved API keys from 1Password",
+		"aliyun", masked(keys.aliyun),
+		"minimax_active", label,
+		"minimax_value", masked(picked),
+	)
 
 	backends := buildBackends(*backendsFlag, *routerFlag, keys)
 	if len(backends) == 0 {
@@ -101,25 +107,55 @@ func main() {
 	}
 }
 
-// keyBundle holds API keys resolved from 1Password.
-type keyBundle struct {
-	aliyun  string
-	minimax string
+// opReader is the interface 1Password secrets are read through. Production
+// wires this to the package-level opRead() (which shells out to `op`); tests
+// substitute a fake map-backed reader so resolveKeys is fully unit-testable
+// without touching the live vault or shelling out.
+type opReader interface {
+	Read(ref string) (string, error)
 }
 
-// resolveKeys reads all credentials from 1Password via `op read`.
-// Keys are never written to disk or logged.
-func resolveKeys(logger *slog.Logger) (keyBundle, error) {
-	aliyun, err := opRead("op://Cursor_IronClaw/Aliyun Team Qwen Token Plan Key/password")
+// liveOpRead is the production opReader; it shells out to the 1Password CLI.
+// Keys are never written to disk or logged in plaintext.
+type liveOpRead struct{}
+
+func (liveOpRead) Read(ref string) (string, error) {
+	return opRead(ref)
+}
+
+// keyBundle holds API keys resolved from 1Password.
+type keyBundle struct {
+	aliyun   string
+	minimax1 string
+	minimax2 string
+}
+
+// Aliyun key 1Password reference.
+const opRefAliyun = "op://Cursor_IronClaw/Aliyun Team Qwen Token Plan Key/password"
+
+// opRefMinimax1 is the primary MiniMax API key (active by default).
+const opRefMinimax1 = "op://Cursor_IronClaw/minimax-api-1/api-key"
+
+// opRefMinimax2 is the secondary MiniMax API key (failover).
+const opRefMinimax2 = "op://Cursor_IronClaw/minimax-api-2/api-key"
+
+// resolveKeys reads all credentials from the supplied opReader. Keys are
+// never written to disk or logged. Both MiniMax keys are required so that
+// pickMinimaxKey has a failover candidate at all times.
+func resolveKeys(r opReader) (keyBundle, error) {
+	aliyun, err := r.Read(opRefAliyun)
 	if err != nil {
 		return keyBundle{}, fmt.Errorf("aliyun key: %w", err)
 	}
-	minimax, err := opRead("op://Cursor_IronClaw/minimax-api-1/api-key")
+	minimax1, err := r.Read(opRefMinimax1)
 	if err != nil {
-		return keyBundle{}, fmt.Errorf("minimax key: %w", err)
+		return keyBundle{}, fmt.Errorf("minimax key1: %w", err)
 	}
-	logger.Info("resolved API keys from 1Password", "aliyun", masked(aliyun), "minimax", masked(minimax))
-	return keyBundle{aliyun: aliyun, minimax: minimax}, nil
+	minimax2, err := r.Read(opRefMinimax2)
+	if err != nil {
+		return keyBundle{}, fmt.Errorf("minimax key2: %w", err)
+	}
+	return keyBundle{aliyun: aliyun, minimax1: minimax1, minimax2: minimax2}, nil
 }
 
 // opRead invokes the 1Password CLI to read a credential reference.
@@ -146,18 +182,40 @@ func masked(s string) string {
 	return strings.Repeat("*", 4) + fmt.Sprintf("(%d chars)", len(s))
 }
 
-// buildBackends assembles the LLMBackend slice from the flag. When a
-// router URL is provided, the router carries the key and per-backend
+// pickMinimaxKey returns the active MiniMax API key plus its human label.
+// `unhealthy` is an optional slice of MiniMax key indices (1 or 2) marked
+// unhealthy by recent failures; nil means both are healthy. The picker
+// prefers key1 when both are healthy; otherwise it picks the next healthy
+// candidate; if both are unhealthy it returns key1 as the last-known-good
+// fallback so the operator sees a clear 401 instead of a confusing 503.
+func pickMinimaxKey(keys keyBundle, unhealthy []int) (string, string) {
+	bad := make(map[int]bool, len(unhealthy))
+	for _, idx := range unhealthy {
+		bad[idx] = true
+	}
+	if !bad[1] {
+		return keys.minimax1, "minimax-api-1"
+	}
+	if !bad[2] {
+		return keys.minimax2, "minimax-api-2"
+	}
+	// Both unhealthy; surface key1 so a 401 is observed.
+	return keys.minimax1, "minimax-api-1"
+}
+
+// buildBackendsWithHealth assembles the LLMBackend slice from the flag and
+// attaches the chosen MiniMax key based on the supplied health signal.
+// When router URL is provided, the router carries the key and per-backend
 // APIURL is bypassed at completion time.
-func buildBackends(flag, router string, keys keyBundle) []eval.LLMBackend {
+func buildBackendsWithHealth(flag, router string, keys keyBundle, unhealthy []int) []eval.LLMBackend {
+	picked, _ := pickMinimaxKey(keys, unhealthy)
 	all := eval.DefaultBackends()
-	// Attach keys.
 	for i := range all {
 		switch all[i].Model {
 		case "qwen3.7-plus", "qwen3.7-max":
 			all[i].APIKey = keys.aliyun
 		case "MiniMax-M3":
-			all[i].APIKey = keys.minimax
+			all[i].APIKey = picked
 		}
 		if router != "" {
 			all[i].Router = router
@@ -177,6 +235,12 @@ func buildBackends(flag, router string, keys keyBundle) []eval.LLMBackend {
 		}
 	}
 	return out
+}
+
+// buildBackends is the convenience wrapper used by main(); assumes both
+// MiniMax keys are healthy and delegates to buildBackendsWithHealth.
+func buildBackends(flag, router string, keys keyBundle) []eval.LLMBackend {
+	return buildBackendsWithHealth(flag, router, keys, nil)
 }
 
 // buildTasks returns the task suite filtered by the tasks flag.
