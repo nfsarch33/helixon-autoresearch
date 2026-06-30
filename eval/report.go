@@ -35,8 +35,8 @@ type EvalReport struct {
 
 // ScoreMatrix is the backend x task x rubric comparative view.
 type ScoreMatrix struct {
-	ByBackend map[string]BackendScore `json:"by_backend"` // keyed by backend name
-	ByTask    map[string]TaskScore    `json:"by_task"`    // keyed by task id
+	ByBackend map[string]*BackendScore `json:"by_backend"` // keyed by backend name
+	ByTask    map[string]*TaskScore    `json:"by_task"`    // keyed by task id
 }
 
 // BackendScore aggregates all tasks for one backend.
@@ -72,12 +72,12 @@ type Summary struct {
 
 // buildMatrix assembles the backend x task x rubric matrix from results.
 func buildMatrix(results []TaskResult, backends []LLMBackend, tasks []Task) ScoreMatrix {
-	byBackend := make(map[string]BackendScore)
-	byTask := make(map[string]TaskScore)
+	byBackend := make(map[string]*BackendScore)
+	byTask := make(map[string]*TaskScore)
 
 	// Initialize per-backend and per-task slots.
 	for _, b := range backends {
-		byBackend[b.Name] = BackendScore{
+		byBackend[b.Name] = &BackendScore{
 			Backend:       b.Name,
 			Model:         b.Model,
 			TaskScores:    make(map[string]float64),
@@ -85,7 +85,7 @@ func buildMatrix(results []TaskResult, backends []LLMBackend, tasks []Task) Scor
 		}
 	}
 	for _, t := range tasks {
-		byTask[t.ID] = TaskScore{
+		byTask[t.ID] = &TaskScore{
 			TaskID:        t.ID,
 			TaskType:      t.Type,
 			TaskName:      t.Name,
@@ -112,7 +112,10 @@ func buildMatrix(results []TaskResult, backends []LLMBackend, tasks []Task) Scor
 
 	for _, r := range results {
 		// Per-backend accumulation.
-		ba := backendAcc[r.Backend]
+		ba, ok := backendAcc[r.Backend]
+		if !ok {
+			continue // unknown backend; skip to avoid corrupting the matrix
+		}
 		ba.sum += r.WeightedScore
 		ba.count++
 		if r.WeightedScore > ba.max {
@@ -131,8 +134,18 @@ func buildMatrix(results []TaskResult, backends []LLMBackend, tasks []Task) Scor
 		bs := byBackend[r.Backend]
 		bs.TaskScores[r.TaskID] = r.WeightedScore
 
-		// Per-task accumulation.
-		ts := byTask[r.TaskID]
+		// Per-task accumulation. Lazily allocate if the task was not
+		// pre-registered (defends against buildSummary passing tasks=nil).
+		ts, ok := byTask[r.TaskID]
+		if !ok {
+			ts = &TaskScore{
+				TaskID:        r.TaskID,
+				TaskType:      r.TaskType,
+				TaskName:      r.TaskName,
+				BackendScores: make(map[string]float64),
+			}
+			byTask[r.TaskID] = ts
+		}
 		ts.BackendScores[r.Backend] = r.WeightedScore
 	}
 

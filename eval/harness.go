@@ -364,9 +364,11 @@ func buildJudgePrompt(task Task, rubric *Rubric, agentOutput string) string {
 }
 
 // parseJudgeResponse extracts the criterion scores from the judge's
-// JSON response, tolerating surrounding code fences or prose.
+// JSON response, tolerating surrounding code fences, <think>...</think>
+// reasoning prefixes (MiniMax-M3 default), and prose wrappers.
 func parseJudgeResponse(rawResp string) (map[CriterionID]Score, error) {
 	cleaned := stripCodeFence(rawResp)
+	cleaned = stripThinkTag(cleaned)
 	start := strings.Index(cleaned, "{")
 	end := strings.LastIndex(cleaned, "}")
 	if start < 0 || end <= start {
@@ -407,6 +409,30 @@ func stripCodeFence(s string) string {
 		s = strings.TrimSuffix(strings.TrimSpace(s), "```")
 	}
 	return strings.TrimSpace(s)
+}
+
+// stripThinkTag removes a leading <think>... reasoning block that some
+// chat models (notably MiniMax-M3) emit before their final answer. If the
+// tag is unclosed (model ran out of tokens), only the leading <think>
+// token is removed so the parser can still recover the JSON that follows.
+func stripThinkTag(s string) string {
+	const openTag = "<think>"
+	const closeTag = "</think>"
+	openIdx := strings.Index(s, openTag)
+	if openIdx < 0 {
+		return s
+	}
+	closeIdx := strings.Index(s[openIdx+len(openTag):], closeTag)
+	if closeIdx < 0 {
+		// Unclosed: drop everything up to the first '{' after the open tag.
+		brace := strings.Index(s[openIdx+len(openTag):], "{")
+		if brace < 0 {
+			return ""
+		}
+		return s[openIdx+len(openTag)+brace:]
+	}
+	afterClose := openIdx + len(openTag) + closeIdx + len(closeTag)
+	return strings.TrimSpace(s[afterClose:])
 }
 
 // zeroScores returns minimum scores for a failed run.

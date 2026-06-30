@@ -81,6 +81,32 @@ func TestParseJudgeResponse(t *testing.T) {
 			input: `{"task_completion":{"value":99,"rationale":"x"},"code_quality":{"value":-5,"rationale":"y"}}`,
 			want:  map[CriterionID]int{CritTaskCompletion: ScaleMax, CritCodeQuality: 1},
 		},
+		{
+			// MiniMax-M3 emits a <think>... reasoning block before the JSON.
+			// The parser must strip the think tag and recover the JSON that follows.
+			name: "think_prefix_minimax_m3",
+			input: `<think>
+Let me analyze the agent's output carefully.
+
+The agent was asked to write a Go package. Let me check criteria...
+Some prose here with {braces} and other characters.
+</think>
+
+Here is my final evaluation:
+
+{
+  "task_completion": {"value": 4, "rationale": "good"},
+  "code_quality": {"value": 3, "rationale": "minor issues"}
+}`,
+			want: map[CriterionID]int{CritTaskCompletion: 4, CritCodeQuality: 3},
+		},
+		{
+			// Unclosed think tag (model ran out of tokens before closing).
+			// Fallback must still try to find the JSON in what remains.
+			name:  "think_unclosed",
+			input: `<think>reasoning that never closes {"task_completion":{"value":2,"rationale":"ok"}}`,
+			want:  map[CriterionID]int{CritTaskCompletion: 2},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -143,6 +169,35 @@ func TestBuildAgentPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "package a") {
 		t.Error("prompt missing context file content")
+	}
+}
+
+// TestBuildMatrix_SingleBackendPerTask guards against a regression where
+// mutations to the per-task BackendScores map were dropped because the
+// task value was being copied by value rather than written back. This
+// reproduces the panic that occurred during the first live eval against
+// MiniMax-M3 with only one backend selected.
+func TestBuildMatrix_SingleBackendPerTask(t *testing.T) {
+	backends := []LLMBackend{{Name: "minimax-m3", Model: "MiniMax-M3"}}
+	tasks := []Task{
+		{ID: "t1", Type: TaskCodeGeneration},
+		{ID: "t2", Type: TaskCodeReview},
+	}
+	results := []TaskResult{
+		{TaskID: "t1", Backend: "minimax-m3", WeightedScore: 80, Verdict: "GREEN"},
+		{TaskID: "t2", Backend: "minimax-m3", WeightedScore: 40, Verdict: "RED"},
+	}
+	matrix := buildMatrix(results, backends, tasks)
+
+	// Without the fix this triggers `panic: assignment to entry in nil map`.
+	if got := matrix.ByTask["t1"].BackendScores["minimax-m3"]; got != 80 {
+		t.Errorf("t1.minimax-m3 score = %.0f, want 80", got)
+	}
+	if got := matrix.ByTask["t2"].BackendScores["minimax-m3"]; got != 40 {
+		t.Errorf("t2.minimax-m3 score = %.0f, want 40", got)
+	}
+	if matrix.ByTask["t1"].BestBackend != "minimax-m3" {
+		t.Errorf("t1 best backend = %s, want minimax-m3", matrix.ByTask["t1"].BestBackend)
 	}
 }
 
