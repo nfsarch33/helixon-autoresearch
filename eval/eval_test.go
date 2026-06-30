@@ -193,3 +193,150 @@ func TestVerdictBands(t *testing.T) {
 		}
 	}
 }
+
+// TestCriterionByID exercises the lookup helper across the seven
+// canonical criteria and confirms the missing-key path is correct.
+func TestCriterionByID(t *testing.T) {
+	rubric := rubricCodeGeneration()
+	for _, want := range rubric.Criteria {
+		got, ok := rubric.CriterionByID(want.ID)
+		if !ok {
+			t.Errorf("expected to find criterion %q", want.ID)
+			continue
+		}
+		if got.ID != want.ID {
+			t.Errorf("CriterionByID(%q) = %q, want %q", want.ID, got.ID, want.ID)
+		}
+	}
+	// Missing key returns false.
+	if _, ok := rubric.CriterionByID("nope"); ok {
+		t.Error("expected CriterionByID(\"nope\") to return ok=false")
+	}
+}
+
+// TestValidate_RejectsBadWeights covers the negative validation paths
+// (empty criteria, missing anchors, weight sum out of tolerance).
+func TestValidate_RejectsBadWeights(t *testing.T) {
+	cases := []struct {
+		name    string
+		rubric  *Rubric
+		wantErr string
+	}{
+		{
+			name: "no_criteria",
+			rubric: &Rubric{
+				Name: "Empty", Version: "test", TaskTypeID: "t",
+				Criteria: nil,
+			},
+			wantErr: "no criteria",
+		},
+		{
+			name: "missing_anchor",
+			rubric: &Rubric{
+				Name: "MissingAnchor", Version: "test", TaskTypeID: "t",
+				Criteria: []Criterion{
+					{ID: "x", Name: "x", Weight: 1.0, AnchorLow: "", AnchorMid: "m", AnchorHigh: "h"},
+				},
+			},
+			wantErr: "missing anchors",
+		},
+		{
+			name: "weights_too_low",
+			rubric: &Rubric{
+				Name: "LowSum", Version: "test", TaskTypeID: "t",
+				Criteria: []Criterion{
+					{ID: "x", Name: "x", Weight: 0.5, AnchorLow: "l", AnchorMid: "m", AnchorHigh: "h"},
+				},
+			},
+			wantErr: "weights sum",
+		},
+		{
+			name: "weights_too_high",
+			rubric: &Rubric{
+				Name: "HighSum", Version: "test", TaskTypeID: "t",
+				Criteria: []Criterion{
+					{ID: "x", Name: "x", Weight: 1.5, AnchorLow: "l", AnchorMid: "m", AnchorHigh: "h"},
+				},
+			},
+			wantErr: "weights sum",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.rubric.Validate()
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestAllDefaultRubrics_HaveSevenCriteria confirms every task-type
+// rubric exposes exactly the seven canonical criteria (no task type
+// drops or duplicates metrics).
+func TestAllDefaultRubrics_HaveSevenCriteria(t *testing.T) {
+	for taskType, r := range DefaultRubrics() {
+		if len(r.Criteria) != 7 {
+			t.Errorf("rubric for %s has %d criteria, want 7", taskType, len(r.Criteria))
+		}
+		seen := make(map[CriterionID]bool, 7)
+		for _, c := range r.Criteria {
+			if seen[c.ID] {
+				t.Errorf("rubric for %s has duplicate criterion %q", taskType, c.ID)
+			}
+			seen[c.ID] = true
+		}
+		for _, want := range []CriterionID{
+			CritTaskCompletion, CritCodeQuality, CritTokenEfficiency,
+			CritContextUse, CritSelfImprovement, CritLongSessionStab,
+			CritErrorRecovery,
+		} {
+			if !seen[want] {
+				t.Errorf("rubric for %s missing criterion %q", taskType, want)
+			}
+		}
+	}
+}
+
+// TestRubricFor_UnknownTaskTypeErrors exercises the error path of
+// rubricFor (called by callers that do not consult DefaultRubrics
+// directly).
+func TestRubricFor_UnknownTaskTypeErrors(t *testing.T) {
+	if _, err := rubricFor("nonexistent"); err == nil {
+		t.Error("expected error for unknown task type")
+	}
+}
+
+// TestRubricVersionStable is a guard against accidental version bumps
+// during refactors: the G-Eval rubric version is the contract for
+// comparability across reports.
+func TestRubricVersionStable(t *testing.T) {
+	if RubricVersion != "2.0.0" {
+		t.Errorf("RubricVersion = %q, want %q (bump intentionally in a release commit)", RubricVersion, "2.0.0")
+	}
+}
+
+// TestScaleMaxIsFive locks the G-Eval 1-5 scale constant. Changing this
+// breaks every prior report; the constant must change in lockstep with
+// a rubric version bump.
+func TestScaleMaxIsFive(t *testing.T) {
+	if ScaleMax != 5 {
+		t.Errorf("ScaleMax = %d, want 5", ScaleMax)
+	}
+}
+
+// TestWithWeight confirms the helper produces an independent copy and
+// does not mutate the source criterion.
+func TestWithWeight(t *testing.T) {
+	src := Criterion{ID: "x", Name: "x", Weight: 0.5}
+	out := withWeight(src, 0.9)
+	if out.Weight != 0.9 {
+		t.Errorf("withWeight result weight = %.2f, want 0.9", out.Weight)
+	}
+	if src.Weight != 0.5 {
+		t.Errorf("withWeight mutated source: weight = %.2f, want 0.5", src.Weight)
+	}
+}
