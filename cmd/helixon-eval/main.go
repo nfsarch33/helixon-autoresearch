@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -26,6 +27,13 @@ func main() {
 	routerFlag := flag.String("router", "", "optional llm-cluster-router base URL; if set, all backends route through it")
 	outFlag := flag.String("out", "", "path to write the JSON report (default: stdout)")
 	timeoutFlag := flag.Duration("timeout", 20*time.Minute, "total run timeout")
+	// Engram persistence flags (v14502-04b). If --engram-url is empty
+	// and HELIXON_EVAL_ENGRAM_URL is unset, persistence is skipped.
+	engramURLFlag := flag.String("engram-url", "", "Engram MCP /memories base URL (default: HELIXON_EVAL_ENGRAM_URL; if both empty, persistence is skipped)")
+	engramAppIDFlag := flag.String("engram-app-id", "", "Engram app_id (default HELIXON_EVAL_ENGRAM_APP_ID or helixon-eval)")
+	engramUserIDFlag := flag.String("engram-user-id", "", "Engram user_id (default HELIXON_EVAL_ENGRAM_USER_ID or nfsarch33)")
+	engramTimeoutFlag := flag.Duration("engram-timeout", 0, "per-request Engram POST timeout (default HELIXON_EVAL_ENGRAM_TIMEOUT or 30s)")
+	experimentIDFlag := flag.String("experiment-id", "", "experiment id used as Engram metadata key (default: helixon-eval-YYYYMMDD-HHMMSS)")
 	flag.Parse()
 
 	// Resolve API keys from 1Password. These MUST never be hardcoded.
@@ -105,6 +113,21 @@ func main() {
 		}
 		fmt.Println(string(data))
 	}
+
+	// Best-effort Engram persistence (v14502-04b). Skipped entirely when
+	// --engram-url is empty and HELIXON_EVAL_ENGRAM_URL is unset.
+	engramCfg := LoadEngramConfig(EngramConfig{
+		URL:     *engramURLFlag,
+		AppID:   *engramAppIDFlag,
+		UserID:  *engramUserIDFlag,
+		Timeout: *engramTimeoutFlag,
+	})
+	expID := *experimentIDFlag
+	if expID == "" {
+		expID = "helixon-eval-" + time.Now().UTC().Format("20060102-150405")
+	}
+	exp := BuildEngramExperiment(expID, "helixon-eval", "agent-centric eval harness", *report)
+	persistReportOptional(ctx, logger, &realHTTPSender{client: &http.Client{Timeout: engramCfg.Timeout}}, engramCfg, exp)
 }
 
 // opReader is the interface 1Password secrets are read through. Production
