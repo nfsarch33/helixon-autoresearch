@@ -21,3 +21,13 @@ Thumbs.db
 
 # Build
 dist/
+
+# Env / secrets (template files tracked separately; runtime env ignored)
+.env
+.env.local
+.env.*.local
+notify.env
+
+# Tooling caches
+.sentrux/
+.plan-sync-prs/
