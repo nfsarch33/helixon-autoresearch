@@ -2,6 +2,7 @@ package autoresearch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -73,10 +74,10 @@ func TestRunExperiment_Success(t *testing.T) {
 
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
-	// dedup search (1) + related search (1) + 6 phase logs + 1 final persist = 9 calls
-	// search calls: dedup (1) + related (1) = 2
-	if len(mock.searchCalls) != 2 {
-		t.Errorf("searchCalls = %d, want 2 (dedup + related)", len(mock.searchCalls))
+	// idempotency search (1) + dedup search (1) + related search (1) + 6 phase logs + 1 final persist = 10 calls
+	// search calls: idempotency + dedup + related = 3 (v18679-3 added idempotency)
+	if len(mock.searchCalls) != 3 {
+		t.Errorf("searchCalls = %d, want 3 (idempotency + dedup + related)", len(mock.searchCalls))
 	}
 }
 
@@ -451,3 +452,165 @@ func TestNormalizeHypothesis(t *testing.T) {
 		}
 	}
 }
+
+// TestJobIDFor_Deterministic verifies JobIDFor returns the same hash for the
+// same (Name, Hypothesis) regardless of whitespace, which is what makes
+// idempotency safe across re-runs that may have introduced trivial diff.
+func TestJobIDFor_Deterministic(t *testing.T) {
+	a := JobIDFor("lr-sweep", "  lower lr improves convergence  ")
+	b := JobIDFor("lr-sweep", "lower lr improves convergence")
+	if a != b {
+		t.Errorf("JobIDFor not whitespace-stable: %q vs %q", a, b)
+	}
+	c := JobIDFor("lr-sweep", "different hypothesis")
+	if a == c {
+		t.Errorf("JobIDFor collision across distinct hypotheses: %q", a)
+	}
+}
+
+// TestFindCompletedExperiment_HitAndMiss exercises the idempotency cache
+// hit/miss path. Mock client returns a pre-seeded completed ExperimentResult
+// matching the JobID.
+func TestFindCompletedExperiment_HitAndMiss(t *testing.T) {
+	mock := &mockEngramClient{
+		searchResult: []Memory{
+			{
+				Memory: mustMarshal(ExperimentResult{
+					ID:         "cached-id",
+					Name:       "lr-sweep",
+					Hypothesis: "lower lr improves convergence",
+					Status:     StatusCompleted,
+					Timestamp:  time.Now(),
+				}),
+			},
+		},
+	}
+	loop := NewExperimentLoop(mock, testLogger())
+
+	// Miss path
+	mock.searchResult = nil
+	_, hit, err := loop.FindCompletedExperiment(context.Background(), JobIDFor("any", "any"))
+	if err != nil || hit {
+		t.Errorf("expected miss, got hit=%v err=%v", hit, err)
+	}
+
+	// Hit path
+	mock.searchResult = []Memory{
+		{
+			Memory: mustMarshal(ExperimentResult{
+				ID:     "cached-id",
+				Status: StatusCompleted,
+			}),
+		},
+	}
+	cached, hit, err := loop.FindCompletedExperiment(context.Background(), JobIDFor("lr-sweep", "lower lr improves convergence"))
+	if err != nil {
+		t.Fatalf("FindCompletedExperiment: %v", err)
+	}
+	if !hit {
+		t.Fatalf("expected hit on seeded completed result")
+	}
+	if cached.ID != "cached-id" {
+		t.Errorf("cached.ID = %q, want cached-id", cached.ID)
+	}
+
+	// Pending result must NOT be returned as a hit (only StatusCompleted)
+	mock.searchResult = []Memory{
+		{
+			Memory: mustMarshal(ExperimentResult{
+				ID:     "pending-id",
+				Status: StatusPending,
+			}),
+		},
+	}
+	_, hit, err = loop.FindCompletedExperiment(context.Background(), JobIDFor("lr-sweep", "lower lr improves convergence"))
+	if err != nil {
+		t.Fatalf("FindCompletedExperiment: %v", err)
+	}
+	if hit {
+		t.Errorf("pending result must not satisfy idempotent replay")
+	}
+}
+
+// TestRunExperiment_IdempotentReplay verifies RunExperiment short-circuits
+// when Engram already has a completed result for the same JobID. The
+// returned error is ErrIdempotentReplay and the result is the cached one.
+func TestRunExperiment_IdempotentReplay(t *testing.T) {
+	mock := &mockEngramClient{
+		searchResult: []Memory{
+			{
+				Memory: mustMarshal(ExperimentResult{
+					ID:         "cached-id",
+					Name:       "lr-sweep",
+					Hypothesis: "lower lr improves convergence",
+					Status:     StatusCompleted,
+					Timestamp:  time.Now(),
+				}),
+			},
+		},
+	}
+	loop := NewExperimentLoop(mock, testLogger())
+
+	result, err := loop.RunExperiment(context.Background(), ExperimentConfig{
+		Name:       "lr-sweep",
+		Hypothesis: "lower lr improves convergence",
+	})
+	if err == nil {
+		t.Fatal("expected ErrIdempotentReplay error on cache hit")
+	}
+	if err != ErrIdempotentReplay {
+		t.Errorf("err = %v, want ErrIdempotentReplay", err)
+	}
+	if result.ID != "cached-id" {
+		t.Errorf("result.ID = %q, want cached-id", result.ID)
+	}
+	if result.Status != StatusCompleted {
+		t.Errorf("result.Status = %q, want completed", result.Status)
+	}
+}
+
+// TestRunExperiment_IdempotencyDisabledForcesRerun verifies that disabling
+// idempotency re-runs the experiment even if a cached result exists.
+func TestRunExperiment_IdempotencyDisabledForcesRerun(t *testing.T) {
+	mock := &mockEngramClient{
+		searchResult: []Memory{
+			{
+				Memory: mustMarshal(ExperimentResult{
+					ID:         "cached-id",
+					Name:       "lr-sweep",
+					Hypothesis: "lower lr improves convergence",
+					Status:     StatusCompleted,
+				}),
+			},
+		},
+	}
+	loop := NewExperimentLoopWithConfig(mock, testLogger(), nil, LoopConfig{
+		PhaseTimeout:       5 * time.Minute,
+		DeduplicateEnabled: false,
+		IdempotencyEnabled: false,
+	})
+
+	result, err := loop.RunExperiment(context.Background(), ExperimentConfig{
+		Name:       "lr-sweep",
+		Hypothesis: "lower lr improves convergence",
+	})
+	if err != nil {
+		t.Fatalf("RunExperiment with idempotency disabled should rerun, got err=%v", err)
+	}
+	if result.ID == "cached-id" {
+		t.Errorf("expected fresh ID, got cached-id (idempotency should be off)")
+	}
+	if result.Status != StatusCompleted {
+		t.Errorf("Status = %q, want completed", result.Status)
+	}
+}
+
+func mustMarshal(v ExperimentResult) string {
+	b, err := jsonMarshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+var jsonMarshal = json.Marshal
