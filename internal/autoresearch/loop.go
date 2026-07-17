@@ -2,6 +2,9 @@ package autoresearch
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,6 +13,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// jsonUnmarshal is a tiny indirection so tests can swap it if needed; in
+// production it is always encoding/json.Unmarshal.
+var jsonUnmarshal = json.Unmarshal
+
 const defaultPhaseTimeout = 5 * time.Minute
 
 // LoopConfig tunes experiment loop behavior.
@@ -17,6 +24,12 @@ type LoopConfig struct {
 	PhaseTimeout       time.Duration
 	DeduplicateEnabled bool
 	DedupSimilarity    float64
+	// IdempotencyEnabled (default true) makes RunExperiment() check Engram for a
+	// previously-completed experiment with the same (Name, Hypothesis) JobID and
+	// short-circuit-return the cached result instead of re-running paid phases.
+	// Per v18679-3 (idempotency-rules.mdc + agentrace). Set false only for
+	// deliberate re-runs (e.g. dry-run benchmarks).
+	IdempotencyEnabled bool
 }
 
 // DefaultLoopConfig returns production defaults.
@@ -25,6 +38,7 @@ func DefaultLoopConfig() LoopConfig {
 		PhaseTimeout:       defaultPhaseTimeout,
 		DeduplicateEnabled: true,
 		DedupSimilarity:    0.95,
+		IdempotencyEnabled: true,
 	}
 }
 
@@ -33,6 +47,46 @@ var ErrDuplicateExperiment = fmt.Errorf("duplicate experiment")
 
 // ErrGuardrailTerminated is returned when a guardrail prevents further execution.
 var ErrGuardrailTerminated = fmt.Errorf("guardrail terminated loop")
+
+// ErrIdempotentReplay is returned when a RunExperiment call short-circuits
+// because Engram already holds a completed result for the same JobID. The
+// returned ExperimentResult is the cached one; the error is informational so
+// callers can distinguish "I just ran this" from "I replayed this".
+var ErrIdempotentReplay = fmt.Errorf("idempotent replay (cached result returned)")
+
+// JobIDFor returns the deterministic identifier for an (Name, Hypothesis)
+// pair. The same pair always produces the same JobID so idempotent retries
+// can dedupe via Engram lookup. Per idempotency-rules.mdc §1 (job_id key).
+func JobIDFor(name, hypothesis string) string {
+	h := sha256.Sum256([]byte(strings.TrimSpace(name) + "\x00" + strings.TrimSpace(hypothesis)))
+	return "exp-" + hex.EncodeToString(h[:16])
+}
+
+// FindCompletedExperiment queries Engram for a completed ExperimentResult
+// matching the given job_id. Returns (result, true, nil) on cache hit;
+// (zero, false, nil) on miss; (zero, false, err) on transport error.
+//
+// Per idempotency-rules.mdc §1: every batch job accepts a job_id and checks
+// a durable store for prior completion before incurring any expensive work.
+//
+// Engram stores the marshalled ExperimentResult JSON as Memory.Memory.
+// We json.Unmarshal the hit and verify Status == StatusCompleted.
+func (l *ExperimentLoop) FindCompletedExperiment(ctx context.Context, jobID string) (ExperimentResult, bool, error) {
+	res, err := l.engram.SearchRelatedExperiments(ctx, jobID, 5)
+	if err != nil {
+		return ExperimentResult{}, false, err
+	}
+	for _, mem := range res {
+		var cached ExperimentResult
+		if err := jsonUnmarshal([]byte(mem.Memory), &cached); err != nil {
+			continue
+		}
+		if cached.Status == StatusCompleted {
+			return cached, true, nil
+		}
+	}
+	return ExperimentResult{}, false, nil
+}
 
 // ExperimentLoop orchestrates the experiment lifecycle through all phases.
 type ExperimentLoop struct {
@@ -112,6 +166,23 @@ func (l *ExperimentLoop) RunExperiment(ctx context.Context, config ExperimentCon
 		"experiment_name", config.Name,
 		"hypothesis", config.Hypothesis,
 	)
+
+	// Idempotency check: if Engram already holds a completed result for this
+	// (Name, Hypothesis) pair, return it. Per idempotency-rules.mdc §1: every
+	// batch job accepts a job_id and checks a durable store for prior
+	// completion before any expensive work.
+	if l.cfg.IdempotencyEnabled {
+		jobID := JobIDFor(config.Name, config.Hypothesis)
+		if cached, hit, err := l.FindCompletedExperiment(ctx, jobID); err != nil {
+			expLogger.Warn("idempotency check failed, continuing without cache",
+				"job_id", jobID, "err", err)
+		} else if hit {
+			l.metrics.RecordRun(StatusSkipped, 0) // count replay against dedupe
+			expLogger.Info("idempotent replay: returning cached completed result",
+				"job_id", jobID, "cached_id", cached.ID)
+			return cached, ErrIdempotentReplay
+		}
+	}
 
 	if l.cfg.DeduplicateEnabled {
 		if dup, err := l.checkDuplicate(ctx, config); err != nil {

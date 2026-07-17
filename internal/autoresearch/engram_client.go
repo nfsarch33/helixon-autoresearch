@@ -90,6 +90,7 @@ func (c *HTTPEngramClient) AddExperimentResult(ctx context.Context, result Exper
 			"status":          string(result.Status),
 			"phase":           result.Phase.String(),
 			"app_id":          c.appID,
+			"job_id":          JobIDFor(result.Name, result.Hypothesis),
 		},
 	}
 
