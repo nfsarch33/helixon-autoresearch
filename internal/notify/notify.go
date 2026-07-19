@@ -1,3 +1,11 @@
+// Package notify provides lightweight multi-channel notification delivery
+// (Email + Telegram). DEPRECATED (v18699-2): the canonical notify system
+// is github.com/nfsarch33/helixon-platform/internal/notify per ADR-077.
+// This package remains functional for backward compatibility; new code
+// SHOULD import the canonical package (which supports vendor rotation
+// per email-vendor-rotation.mdc and the v14271-04 API-only mandate).
+//
+// See: cursor-global-kb/adrs/ADR-077-notify-component-canonicity.md
 package notify
 
 import (

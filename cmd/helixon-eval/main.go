@@ -21,6 +21,15 @@ import (
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
+	// DEPRECATED (v18699-2): this CLI is deprecated. The canonical
+	// helixon-eval binary is github.com/nfsarch33/helixon-platform/cmd/helixon-eval
+	// per ADR-075. This binary remains functional for backward compatibility.
+	// New code SHOULD install and use the platform binary via `runx eval run --all`.
+	logger.Warn("DEPRECATED: cmd/helixon-eval is deprecated; use helixon-platform/cmd/helixon-eval (ADR-075)",
+		"sprint", "v18699-2",
+		"see", "cursor-global-kb/adrs/ADR-075-helixon-eval-binary-canonicity.md",
+	)
+
 	backendsFlag := flag.String("backends", "all", "comma-separated backend names or 'all'")
 	tasksFlag := flag.String("tasks", "all", "comma-separated task type ids or 'all'")
 	judgeFlag := flag.String("judge", "", "backend name to use as G-Eval judge (defaults to none of the candidates; use a distinct backend to avoid self-preference)")
