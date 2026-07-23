@@ -1,3 +1,4 @@
+# runx-public-repo-gate: allow-file fleet_host_alias,network_topology
 # helixon-autoresearch Integration
 
 Connects the autoresearch experiment runner to the eval harness, the

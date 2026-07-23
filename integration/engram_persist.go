@@ -1,6 +1,6 @@
 // Package integration connects the helixon-autoresearch experiment runner
 // to the eval harness, the 10-stage academic research pipeline, and the
-// Engram persistence layer on wsl1:8280.
+// Engram persistence layer on <host>:<port>.
 //
 // Flow:
 //  1. The autoresearch runner creates an experiment (10-stage pipeline).
@@ -23,9 +23,9 @@ import (
 )
 
 // EngramPersistor persists eval experiment metadata to the Engram memory
-// engine. The Engram instance verified in Sprint A runs on wsl1:8280.
+// engine. The Engram instance verified in Sprint A runs on <host>:<port>.
 type EngramPersistor struct {
-	EngramURL string // e.g. http://100.119.90.30:8280
+	EngramURL string // e.g. http://<host>:<port>
 	AppID     string // e.g. autoresearch-eval
 	UserID    string // e.g. nfsarch33
 	client    *http.Client
@@ -34,7 +34,7 @@ type EngramPersistor struct {
 // NewEngramPersistor constructs a persistor with sensible defaults.
 func NewEngramPersistor(engramURL, appID, userID string) *EngramPersistor {
 	if engramURL == "" {
-		engramURL = "http://100.119.90.30:8280"
+		engramURL = "http://<host>:<port>"
 	}
 	if appID == "" {
 		appID = "autoresearch-eval"

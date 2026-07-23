@@ -1,3 +1,4 @@
+// runx-public-repo-gate: allow-file secret_cred_ref
 // Package security provides the helixon-autoresearch security suite and
 // helpers for asserting that the suite passes in a clean environment
 // (no API tokens present, no live network calls, no secret-bearing

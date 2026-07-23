@@ -163,13 +163,13 @@ type keyBundle struct {
 }
 
 // Aliyun key 1Password reference.
-const opRefAliyun = "op://Cursor_IronClaw/Aliyun Team Qwen Token Plan Key/password"
+const opRefAliyun = "op://<vault-name>/Aliyun Team Qwen Token Plan Key/password"
 
 // opRefMinimax1 is the primary MiniMax API key (active by default).
-const opRefMinimax1 = "op://Cursor_IronClaw/minimax-api-1/api-key"
+const opRefMinimax1 = "op://<vault-name>/<item-1>/api-key"
 
 // opRefMinimax2 is the secondary MiniMax API key (failover).
-const opRefMinimax2 = "op://Cursor_IronClaw/minimax-api-2/api-key"
+const opRefMinimax2 = "op://<vault-name>/<item-2>/api-key"
 
 // resolveKeys reads all credentials from the supplied opReader. Keys are
 // never written to disk or logged. Both MiniMax keys are required so that
@@ -226,13 +226,13 @@ func pickMinimaxKey(keys keyBundle, unhealthy []int) (string, string) {
 		bad[idx] = true
 	}
 	if !bad[1] {
-		return keys.minimax1, "minimax-api-1"
+		return keys.minimax1, "<item-1>"
 	}
 	if !bad[2] {
-		return keys.minimax2, "minimax-api-2"
+		return keys.minimax2, "<item-2>"
 	}
 	// Both unhealthy; surface key1 so a 401 is observed.
-	return keys.minimax1, "minimax-api-1"
+	return keys.minimax1, "<item-1>"
 }
 
 // buildBackendsWithHealth assembles the LLMBackend slice from the flag and

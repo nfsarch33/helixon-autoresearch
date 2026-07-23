@@ -1,3 +1,4 @@
+# runx-public-repo-gate: allow-file network_topology
 # Helixon Autoresearch
 
 Autonomous ML experiment runner inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch).

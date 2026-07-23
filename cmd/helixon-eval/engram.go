@@ -54,7 +54,7 @@ type engramMemory struct {
 
 // EngramConfig configures the Engram persistor.
 type EngramConfig struct {
-	URL     string        // e.g. http://100.119.90.30:8280
+	URL     string        // e.g. http://<host>:<port>
 	AppID   string        // e.g. helixon-eval
 	UserID  string        // e.g. nfsarch33
 	Timeout time.Duration // per-request; defaults to 30s
