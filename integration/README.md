@@ -73,8 +73,11 @@ is stored as the memory content with metadata tags (`experiment_id`,
 `stage`, `verdict`, `best_backend`, `rubric_version`) for later recall.
 
 ```go
+// Engram endpoint: use the operator-defined alias (<engram-host>) instead
+// of the raw Tailscale IP. The integration test reads the alias from
+// INTEGRATION_ENGRAM_BASE_URL or a runx-resolved default.
 persistor := integration.NewEngramPersistor(
-    "http://100.119.90.30:8280", // wsl1 Engram
+    "http://<engram-host>:8280", // wsl1 Engram
     "autoresearch-eval",
     "nfsarch33",
 )
