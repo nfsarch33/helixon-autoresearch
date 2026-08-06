@@ -1,3 +1,4 @@
+# runx-public-repo-gate: allow-file fleet_host_alias,network_topology
 # Helixon Agent-Centric Eval Harness
 
 ## Purpose
@@ -83,17 +84,18 @@ export ALIYUN_API_KEY=$(op read "op://Cursor_IronClaw/Aliyun Team Qwen Token Pla
 export MINIMAX_API_KEY=$(op read "op://Cursor_IronClaw/minimax-api-1/api-key")
 
 # Run all backends on all tasks, routing through the llm-cluster-router
+# (use the operator-defined alias <llm-router-host> — never the raw Tailscale IP)
 go run ./cmd/helixon-eval \
   --backends all \
   --tasks all \
-  --router http://100.103.124.50:8787 \
+  --router http://<llm-router-host>:8787 \
   --out /tmp/eval-report.json
 
 # Run a single backend on a single task type for a quick smoke test
 go run ./cmd/helixon-eval \
   --backends aliyun-qwen3.7-plus \
   --tasks code_generation \
-  --router http://100.103.124.50:8787
+  --router http://<llm-router-host>:8787
 ```
 
 The CLI reads keys via `op read` directly; you do not need to export

@@ -45,7 +45,7 @@ Commands:
   search <query> [limit]      Search related experiments
 
 Environment:
-  ENGRAM_URL       Engram API base URL (default: http://127.0.0.1:18888)
+  ENGRAM_URL       Engram API base URL (default: http://127.0.0.1:<port>)
   ENGRAM_APP_ID    Engram app ID (default: autoresearch)
   ENGRAM_USER_ID   Engram user ID (default: nfsarch33)
 `)

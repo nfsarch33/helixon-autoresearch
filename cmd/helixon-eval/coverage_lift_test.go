@@ -140,8 +140,8 @@ func TestMasked_Long(t *testing.T) {
 func TestPickMinimaxKey_AllHealthy(t *testing.T) {
 	keys := keyBundle{aliyun: "a", minimax1: "m1", minimax2: "m2"}
 	got, label := pickMinimaxKey(keys, nil)
-	if got != "m1" || label != "minimax-api-1" {
-		t.Errorf("expected m1/minimax-api-1, got %q/%q", got, label)
+	if got != "m1" || label != "<item-1>" {
+		t.Errorf("expected m1/<item-1>, got %q/%q", got, label)
 	}
 }
 
@@ -149,8 +149,8 @@ func TestPickMinimaxKey_AllHealthy(t *testing.T) {
 func TestPickMinimaxKey_Key1Unhealthy(t *testing.T) {
 	keys := keyBundle{minimax1: "m1", minimax2: "m2"}
 	got, label := pickMinimaxKey(keys, []int{1})
-	if got != "m2" || label != "minimax-api-2" {
-		t.Errorf("expected m2/minimax-api-2, got %q/%q", got, label)
+	if got != "m2" || label != "<item-2>" {
+		t.Errorf("expected m2/<item-2>, got %q/%q", got, label)
 	}
 }
 
@@ -158,8 +158,8 @@ func TestPickMinimaxKey_Key1Unhealthy(t *testing.T) {
 func TestPickMinimaxKey_Key2Unhealthy(t *testing.T) {
 	keys := keyBundle{minimax1: "m1", minimax2: "m2"}
 	got, label := pickMinimaxKey(keys, []int{2})
-	if got != "m1" || label != "minimax-api-1" {
-		t.Errorf("expected m1/minimax-api-1, got %q/%q", got, label)
+	if got != "m1" || label != "<item-1>" {
+		t.Errorf("expected m1/<item-1>, got %q/%q", got, label)
 	}
 }
 
@@ -167,8 +167,8 @@ func TestPickMinimaxKey_Key2Unhealthy(t *testing.T) {
 func TestPickMinimaxKey_BothUnhealthy(t *testing.T) {
 	keys := keyBundle{minimax1: "m1", minimax2: "m2"}
 	got, label := pickMinimaxKey(keys, []int{1, 2})
-	if got != "m1" || label != "minimax-api-1" {
-		t.Errorf("expected m1/minimax-api-1 as fallback, got %q/%q", got, label)
+	if got != "m1" || label != "<item-1>" {
+		t.Errorf("expected m1/<item-1> as fallback, got %q/%q", got, label)
 	}
 }
 
@@ -354,15 +354,15 @@ func TestFindBackend_ByName(t *testing.T) {
 }
 
 // TestOpReadConstants_HasExpectedRefs ensures the 1Password refs follow
-// the op://Cursor_IronClaw/<item>/<field> pattern.
+// the op://<vault-name>/<item>/<field> pattern.
 func TestOpReadConstants_HasExpectedRefs(t *testing.T) {
 	for name, ref := range map[string]string{
 		"aliyun":   opRefAliyun,
 		"minimax1": opRefMinimax1,
 		"minimax2": opRefMinimax2,
 	} {
-		if !strings.HasPrefix(ref, "op://Cursor_IronClaw/") {
-			t.Errorf("%s ref %q does not start with op://Cursor_IronClaw/", name, ref)
+		if !strings.HasPrefix(ref, "op://<vault-name>/") {
+			t.Errorf("%s ref %q does not start with op://<vault-name>/", name, ref)
 		}
 	}
 }

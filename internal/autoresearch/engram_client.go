@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	defaultEngramURL = "http://127.0.0.1:18888"
+	defaultEngramURL = "http://127.0.0.1:<port>"
 	defaultAppID     = "autoresearch"
 	defaultUserID    = "nfsarch33"
 )

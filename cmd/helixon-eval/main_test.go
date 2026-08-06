@@ -30,9 +30,9 @@ func (f *fakeOpRead) Read(ref string) (string, error) {
 func TestResolveKeys_ReadsBothMinimaxKeys(t *testing.T) {
 	f := &fakeOpRead{
 		values: map[string]string{
-			"op://Cursor_IronClaw/Aliyun Team Qwen Token Plan Key/password": "aliyun-secret",
-			"op://Cursor_IronClaw/minimax-api-1/api-key":                    "minimax-key-1",
-			"op://Cursor_IronClaw/minimax-api-2/api-key":                    "minimax-key-2",
+			"op://<vault-name>/Aliyun Team Qwen Token Plan Key/password": "aliyun-secret",
+			"op://<vault-name>/<item-1>/api-key":                    "minimax-key-1",
+			"op://<vault-name>/<item-2>/api-key":                    "minimax-key-2",
 		},
 	}
 	keys, err := resolveKeys(f)
@@ -55,8 +55,8 @@ func TestResolveKeys_ReadsBothMinimaxKeys(t *testing.T) {
 func TestResolveKeys_FailsOnMissingAliyun(t *testing.T) {
 	f := &fakeOpRead{
 		values: map[string]string{
-			"op://Cursor_IronClaw/minimax-api-1/api-key": "minimax-key-1",
-			"op://Cursor_IronClaw/minimax-api-2/api-key": "minimax-key-2",
+			"op://<vault-name>/<item-1>/api-key": "minimax-key-1",
+			"op://<vault-name>/<item-2>/api-key": "minimax-key-2",
 		},
 	}
 	_, err := resolveKeys(f)
@@ -65,12 +65,12 @@ func TestResolveKeys_FailsOnMissingAliyun(t *testing.T) {
 	}
 }
 
-// Test 3: resolveKeys fails fast when minimax-api-2 ref is missing.
+// Test 3: resolveKeys fails fast when <item-2> ref is missing.
 func TestResolveKeys_FailsOnMissingMinimax2(t *testing.T) {
 	f := &fakeOpRead{
 		values: map[string]string{
-			"op://Cursor_IronClaw/Aliyun Team Qwen Token Plan Key/password": "aliyun-secret",
-			"op://Cursor_IronClaw/minimax-api-1/api-key":                    "minimax-key-1",
+			"op://<vault-name>/Aliyun Team Qwen Token Plan Key/password": "aliyun-secret",
+			"op://<vault-name>/<item-1>/api-key":                    "minimax-key-1",
 		},
 	}
 	_, err := resolveKeys(f)
@@ -86,8 +86,8 @@ func TestPickMinimaxKey_DefaultsToKey1(t *testing.T) {
 	if got != "k1" {
 		t.Errorf("got %q, want %q", got, "k1")
 	}
-	if label != "minimax-api-1" {
-		t.Errorf("label = %q, want %q", label, "minimax-api-1")
+	if label != "<item-1>" {
+		t.Errorf("label = %q, want %q", label, "<item-1>")
 	}
 }
 
@@ -98,8 +98,8 @@ func TestPickMinimaxKey_FailoverToKey2(t *testing.T) {
 	if got != "k2" {
 		t.Errorf("got %q, want %q", got, "k2")
 	}
-	if label != "minimax-api-2" {
-		t.Errorf("label = %q, want %q", label, "minimax-api-2")
+	if label != "<item-2>" {
+		t.Errorf("label = %q, want %q", label, "<item-2>")
 	}
 }
 
@@ -111,8 +111,8 @@ func TestPickMinimaxKey_BothUnhealthy_ReturnsKey1(t *testing.T) {
 	if got != "k1" {
 		t.Errorf("got %q, want %q (last-known-good key1)", got, "k1")
 	}
-	if label != "minimax-api-1" {
-		t.Errorf("label = %q, want %q (last-known-good key1)", label, "minimax-api-1")
+	if label != "<item-1>" {
+		t.Errorf("label = %q, want %q (last-known-good key1)", label, "<item-1>")
 	}
 }
 
@@ -123,8 +123,8 @@ func TestPickMinimaxKey_OnlyKey2Healthy(t *testing.T) {
 	if got != "k2" {
 		t.Errorf("got %q, want %q", got, "k2")
 	}
-	if label != "minimax-api-2" {
-		t.Errorf("label = %q, want %q", label, "minimax-api-2")
+	if label != "<item-2>" {
+		t.Errorf("label = %q, want %q", label, "<item-2>")
 	}
 }
 
@@ -178,9 +178,9 @@ func TestBuildBackends_RotatesOnHealthSignal(t *testing.T) {
 func TestResolveKeys_CallsOpReadOncePerRef(t *testing.T) {
 	f := &fakeOpRead{
 		values: map[string]string{
-			"op://Cursor_IronClaw/Aliyun Team Qwen Token Plan Key/password": "a",
-			"op://Cursor_IronClaw/minimax-api-1/api-key":                    "k1",
-			"op://Cursor_IronClaw/minimax-api-2/api-key":                    "k2",
+			"op://<vault-name>/Aliyun Team Qwen Token Plan Key/password": "a",
+			"op://<vault-name>/<item-1>/api-key":                    "k1",
+			"op://<vault-name>/<item-2>/api-key":                    "k2",
 		},
 	}
 	if _, err := resolveKeys(f); err != nil {
