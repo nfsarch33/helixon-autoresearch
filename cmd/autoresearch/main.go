@@ -23,6 +23,10 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		cmdRun(logger)
+	case "smoke":
+		cmdSmoke(logger)
+	case "compare":
+		cmdCompare(logger)
 	case "history":
 		cmdHistory(logger)
 	case "search":
@@ -41,6 +45,8 @@ func printUsage() {
 
 Commands:
   run <name> <hypothesis>     Run a new experiment
+  smoke                        Run a synthetic tiny experiment loop (smoke test)
+  compare <base> <cand>       Compare two experiments via synthetic fixtures
   history <experiment-id>     Show experiment history
   search <query> [limit]      Search related experiments
 
