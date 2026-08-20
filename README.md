@@ -16,7 +16,7 @@ Autonomous ML experiment runner inspired by [karpathy/autoresearch](https://gith
 
 ## Requirements
 
-- Go 1.23+
+- Go 1.26+
 - [Engram](https://github.com/nfsarch33/engram) memory engine (for persistence)
 
 ## Quick Start
