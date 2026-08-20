@@ -80,7 +80,7 @@ self-improvement task). Weights sum to 1.0 per rubric.
 
 ```bash
 # Resolve API keys from 1Password (never hardcoded)
-export ALIYUN_API_KEY=$(op read "op://Cursor_IronClaw/Aliyun Team Qwen Token Plan Key/password")
+export ALIYUN_API_KEY=$(op read "op://Cursor_IronClaw/<qwen-key-item-name>/password")
 export MINIMAX_API_KEY=$(op read "op://Cursor_IronClaw/minimax-api-1/api-key")
 
 # Run all backends on all tasks, routing through the llm-cluster-router
