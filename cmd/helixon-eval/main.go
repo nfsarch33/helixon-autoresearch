@@ -163,7 +163,7 @@ type keyBundle struct {
 }
 
 // Aliyun key 1Password reference.
-const opRefAliyun = "op://<vault-name>/Aliyun Team Qwen Token Plan Key/password"
+const opRefAliyun = "op://<vault-name>/<qwen-key-item-name>/password"
 
 // opRefMinimax1 is the primary MiniMax API key (active by default).
 const opRefMinimax1 = "op://<vault-name>/<item-1>/api-key"
