@@ -27,4 +27,4 @@ Autonomous ML experiment runner. Extracted from helixon-ec (ai-agent-business-st
 
 - Go stdlib first. Single external dep: `github.com/google/uuid`.
 - Conventional commits: `type(scope): message`.
-- Identity: `nfsarch33` / SSH `~/.ssh/<key>`.
+- Identity: `<redacted>` / SSH `~/.ssh/<key>`.
